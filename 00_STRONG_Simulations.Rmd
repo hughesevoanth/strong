@@ -1,0 +1,304 @@
+---
+title: "STRONG Study Simulations"
+author: "David A Hughes"
+date: "2025-11-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Methods:
+
+Energy intake was modeled using linear mixed-effects regression (lmerTest), with a random intercept for participant to account for repeated measures across meals on rest and exercise days. Fixed effects included condition (rest vs exercise), meal (breakfast, lunch, snack, dinner), and their interaction. We first evaluated whether the effect of exercise differed across meals by comparing a model including only the main effects of condition and meal with a model additionally containing the condition × meal interaction term. This comparison used a likelihood ratio test (LRT), assessing whether inclusion of the interaction significantly improved model fit. Breakfast was included as a baseline meal that occurred before the exercise intervention; therefore, the condition effect at breakfast is expected to be zero and provides an internal benchmark for evaluating exercise-related changes at later meals.
+
+When the interaction was supported, we proceeded with the full interaction model and estimated marginal means (EMMs) for condition at each meal using the emmeans package. Meal-specific effects of exercise were quantified by pairwise contrasts (exercise − rest) within each meal, with standard errors and degrees of freedom obtained using the Satterthwaite approximation as implemented in lmerTest. These contrasts represent the model-based exercise effect at each meal and reflect the repeated-measures structure of the data. P-values for meal-specific contrasts were adjusted for multiple testing using the Tukey method, which controls the familywise error rate.
+
+## Load libraries
+
+```{r}
+library(tidyverse)
+library(purrr)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(patchwork)
+```
+
+## source function files
+
+```{r}
+files = list.files("functions", full.names = TRUE)
+for(f in files){source(f)}
+```
+
+## Simulate data
+
+```{r}
+# meal_means = c(500, 616, 209, 641),
+
+## Simulate a 20% reduction in energy intake under EXERCISE condition
+mydata <- simulate_energy_intake(
+  n_ind = 120,
+  beta_cond_by_meal = c(
+    breakfast = 0,
+    lunch     = -(616 * 0.2),
+    snack     = -(209 * 0),
+    dinner    = -(641 * 0)
+  )
+)
+```
+
+
+## Model fitting
+
+
+```{r}
+fit0 <- lmerTest::lmer(energy_intake ~ condition + meal + (1 | id), data = mydata )
+fit <- lmerTest::lmer(energy_intake ~ condition * meal + (1 | id), data = mydata )
+```
+
+### Is the interaction significant?
+
+```{r}
+anova(fit0, fit)
+```
+## Estimate meal specific effects
+
+```{r}
+emm <- emmeans(fit, ~ condition | meal)
+emm_pairs = pairs(emm, adjust = "tukey")
+
+## Extract a data frame
+emm_df <-  as.data.frame( emm_pairs )
+emm_df <- emm_df |>
+  select(meal, estimate, SE, df, t.ratio, p.value )
+
+## Display results in a table
+# knitr::kable(emm_df) |> 
+#   kableExtra::kable_classic(full_width = FALSE) 
+emm_df
+```
+
+
+## Visualize results
+
+```{r, fig.width = 10, fig.height = 7}
+my_strong_plot(mydata)
+```
+
+
+
+```{r, fig.width = 8, fig.height = 5}
+emm_plot_data <- as.data.frame(emm)
+
+emm_plot(emm_plot_data)
+```
+
+## Power Analysis
+
+### Run Power Analysis
+
+#### Lunch only effect after exercise
+
+```{r, warning=FALSE, message=FALSE}
+lunch_effect_sims = power_simulation(
+  n = 12, 
+  n_reps = 500, 
+  effect_sizes = seq(0, 0.50, by = 0.1), 
+  power_group_by = "lunch_prop_effect",
+  pivot_long_on = "lunch_prop_effect",
+  meals_effected = "lunch" 
+)
+
+```
+
+#### plot power curves for a lunch only effect after exercise
+
+```{r}
+lunch_effect_sims$plot
+```
+
+#### Lunch only effect after exercise
+
+```{r, warning=FALSE, message=FALSE}
+allmeal_effect_sims = power_simulation(
+  n = 12, 
+  n_reps = 500, 
+  effect_sizes = seq(0, 0.50, by = 0.1), 
+  power_group_by = "lunch_prop_effect",
+  pivot_long_on = "lunch_prop_effect",
+  meals_effected = c("lunch", "snack", "dinner")
+)
+
+```
+
+#### plot power curves 
+
+```{r}
+allmeal_effect_sims$plot
+```
+
+
+
+## power analysis run 1
+
+```{r, warning = FALSE, message = FALSE}
+effect_sizes <- seq(0, 0.80, by = 0.05)
+n_reps <- 250
+
+my_sims <- map_dfr(effect_sizes, function(eff) {
+  map_dfr( 1:n_reps , function(rep_id) {
+    run_simulation(n = 12, lunch_prop_effect = eff, snack_prop_effect = 0, dinner_prop_effect = 0)
+  })
+})
+
+my_sims = my_sims |> 
+  mutate( lunch_kcal_effect = as.numeric(616 * lunch_prop_effect), 
+          snack_kcal_effect = as.numeric(209 * snack_prop_effect), 
+          dinner_kcal_effect = as.numeric(641 * dinner_prop_effect) , 
+          .before = interaction)
+
+
+```
+
+
+## estimate power
+
+```{r}
+power_summary <- my_sims |>
+  group_by(lunch_prop_effect) |>
+  summarise(
+    lunch_kcal_effect = first(lunch_kcal_effect),
+    n_sims = n(),
+    power_interaction = mean(interaction < 0.05),
+    power_breakfast   = mean(breakfast < 0.05),
+    power_lunch       = mean(lunch < 0.05),
+    power_snack       = mean(snack < 0.05),
+    power_dinner      = mean(dinner < 0.05)
+  )
+
+```
+
+## plot power curves
+
+```{r}
+
+power_long <- power_summary |>
+  select(lunch_kcal_effect, starts_with("power_")) |>
+  pivot_longer(
+    cols = starts_with("power_"),
+    names_to = "test",
+    values_to = "power"
+  )
+```
+
+
+```{r}
+power_long |> 
+  mutate(test = factor(test, levels = c("power_interaction", "power_lunch", "power_snack", "power_dinner", "power_breakfast") ) ) |>
+  #filter(test %in% c("power_interaction", "power_lunch") ) |>
+  ggplot(aes(x = lunch_kcal_effect, y = power, color = test)) +
+  geom_hline(yintercept = 0.8, linetype = "dashed", color = "gray50") +
+  geom_line() +
+  geom_point() +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(
+    x = "kcal reduction at lunch",
+    y = "Power (α = 0.05)",
+    color = "Test"
+  ) +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1")
+
+```
+
+
+
+## power analysis run 2
+
+
+### Run simulations
+
+```{r, warning = FALSE, message = FALSE}
+effect_sizes <- seq(0, 0.80, by = 0.05)
+n_reps <- 250
+
+my_sims_v2 <- map_dfr(effect_sizes, function(eff) {
+  map_dfr( 1:n_reps , function(rep_id) {
+    run_simulation(n = 12, lunch_prop_effect = eff, snack_prop_effect = eff, dinner_prop_effect = eff)
+  })
+})
+
+my_sims_v2 = my_sims_v2 |> 
+  mutate( lunch_kcal_effect = as.numeric(616 * lunch_prop_effect), 
+          snack_kcal_effect = as.numeric(209 * snack_prop_effect), 
+          dinner_kcal_effect = as.numeric(641 * dinner_prop_effect) , 
+          .before = interaction)
+
+
+```
+
+
+## estimate power
+
+```{r}
+power_summary <- my_sims_v2 |>
+  group_by(lunch_prop_effect) |>
+  summarise(
+    lunch_kcal_effect = first(lunch_kcal_effect),
+    snack_kcal_effect = first(snack_kcal_effect),
+    dinner_kcal_effect = first(dinner_kcal_effect),
+    n_sims = n(),
+    power_interaction = mean(interaction < 0.05),
+    power_breakfast   = mean(breakfast < 0.05),
+    power_lunch       = mean(lunch < 0.05),
+    power_snack       = mean(snack < 0.05),
+    power_dinner      = mean(dinner < 0.05)
+  )
+
+```
+
+## plot power curves
+
+```{r}
+power_long <- power_summary |>
+  select(lunch_prop_effect, starts_with("power_")) |>
+  pivot_longer(
+    cols = starts_with("power_"),
+    names_to = "test",
+    values_to = "power"
+  )
+```
+
+
+```{r}
+power_long |> 
+  mutate(test = factor(test, levels = c("power_interaction", "power_lunch", "power_snack", "power_dinner", "power_breakfast") ) ) |>
+  #filter(test %in% c("power_interaction", "power_lunch") ) |>
+  ggplot(aes(x = lunch_prop_effect, y = power, color = test)) +
+  geom_hline(yintercept = 0.8, linetype = "dashed", color = "gray50") +
+  geom_line() +
+  geom_point() +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(
+    x = "proportional reduction at lunch",
+    y = "Power (α = 0.05)",
+    color = "Test"
+  ) +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1")
+
+```
+
+
+
+
+## Session info
+
+```{r}
+sessionInfo()
+```
+
+

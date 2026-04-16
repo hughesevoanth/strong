@@ -1,0 +1,624 @@
+---
+title: "STRONG Study Primary Analyses"
+author: "David A Hughes"
+date: "2025-11-20"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Setup
+
+### load libraries
+
+```{r, warning=FALSE, message=FALSE}
+# install.packges("lmerTest")
+# Bioconductor::install("lmerTest")
+# BiocLite::install("lmerTest")
+
+library(tidyverse)  # install.packages("tidyverse")
+library(lmerTest)
+library(readxl)
+library(gtsummary)
+library(gt)
+library(emmeans)
+library(dendextend)
+library(grid)
+```
+
+### source function files
+
+```{r}
+files = list.files("functions", full.names = TRUE)
+for(f in files){source(f)}
+```
+
+
+### load data
+
+```{r}
+f = "../data/STRONG_data spreadsheet.xlsx"
+mydata = read_excel(f)
+
+colnames(mydata) = gsub("\\/", "_", colnames(mydata) ) 
+```
+
+### Edit variable names
+
+```{r}
+colnames(mydata) = gsub("\\/", "_", colnames(mydata) ) 
+colnames(mydata) = gsub(" ", "_", colnames(mydata) )
+```
+
+## Estiamte the number of effective outcome traits in the data
+
+### Tree Cut
+
+#### Correlation Structure Among all outcomes / variables
+
+```{r, fig.width = 15, fig.height = 8}
+vars_2_test = colnames(mydata)[-c(1:7)]
+# length(vars_2_test) ## 39
+
+Cmat = mydata |> select(vars_2_test) |> cor( use = "pairwise.complete.obs", method = "sp")
+Dmat = as.dist( 1-abs(Cmat) )
+nj = hclust(Dmat, method = "complete")
+
+## k clusters based on cut height
+k = cutree(nj, h = 0.5)
+effnumb = length(unique(k)) ## 10
+
+
+## Define Plot colors
+pcol = c(RColorBrewer::brewer.pal(n = 4, name = "Set1"), "black")
+
+## Make a dendrogram
+nj <- suppressWarnings( as.dendrogram(nj) |>
+  set("labels_cex", 1.25) |> 
+  color_branches( h = 0.5, col = pcol) |>
+  color_labels(h = 0.5, col = pcol) 
+)
+
+## report k
+cli::cli_alert_info( "Number of effective outcome traits based on tree cutting: {effnumb}" )
+```
+
+```{r, include = FALSE}
+## Save dendrogram to file
+f = "../results/figures/variable_correlation_dendrogram.pdf"
+pdf(f, width = 15, height = 8)
+par(mar = c(17,3,2,1) )
+plot(nj, 
+     main = paste0("Clustering of Variables Based on Spearman's Correlation Structure; k = ",effnumb) )
+abline(h = 0.5, col = "black", lwd = 2, lty = 2)
+dev.off()
+```
+
+
+#### plot dendrogram
+
+```{r, fig.width = 15, fig.height = 8}
+
+## plot dendrogram
+par(mar = c(17,3,2,1) )
+plot(nj, 
+     main = paste0("Clustering of Variables Based on Spearman's Correlation Structure; k = ",effnumb) )
+abline(h = 0.5, col = "black", lwd = 2, lty = 2)
+
+```
+#### Correlation Structure Among non-meal variables
+
+```{r, fig.width = 12, fig.height = 6, warning=FALSE, message=FALSE}
+w = c( which(grepl("Breakfast", colnames(Cmat))),
+       which(grepl("Lunch", colnames(Cmat))),
+       which(grepl("Snack", colnames(Cmat))),
+       which(grepl("Diner", colnames(Cmat)))
+       # which(grepl("Sleep", colnames(Cmat)))
+       )
+Cmat2 = Cmat[-w,-w]
+# dim(Cmat2)
+Dmat2 = as.dist( 1-abs(Cmat2) ) 
+
+
+nj = hclust(Dmat2, method = "complete")
+
+## k clusters based on cut height
+k2 = cutree(nj, h = 0.5)
+effnumb2 = length(unique(k2))
+
+pcol = c(RColorBrewer::brewer.pal(n = 4, name = "Set1"), "black")
+
+
+## Make a dendrogram
+nj <- as.dendrogram(nj) |>
+  set("labels_cex", 1) |> 
+  color_branches( h = 0.5, col = pcol) |>
+  color_labels(h = 0.5, col = pcol)
+
+
+## plot dendrogram
+par(mar = c(13,3,2,1) )
+plot(nj, 
+     main = paste0("Clustering of Variables Based on Spearman's Correlation Structure; k = ", effnumb2 ) )
+abline(h = 0.5, col = "black", lwd = 2, lty = 2)
+
+```
+
+
+### PCA
+
+```{r}
+pca_data = mydata |> select( all_of(vars_2_test) ) |> na.omit()
+ind_pca_fit  = prcomp( pca_data, center = TRUE, scale = TRUE)
+var_pca_fit  = prcomp( Cmat, center = TRUE, scale = TRUE)
+## extract variance explained
+varexp = summary(var_pca_fit)[[6]][2,]
+## extract cummulative variance explained
+cum_varexp = summary(var_pca_fit)[[6]][3,]
+## Cummulative number of PCs needed to explain >=95% of the variance
+effnumb = min( which( cum_varexp > 0.95 ) )
+
+cli::cli_alert_info( "Number of effective outcome traits based on PCA: {effnumb}" )
+```
+
+#### PCA plot of variable structure
+
+```{r}
+pcaplot = var_pca_fit$x |> as_tibble() |> mutate(k = as.factor(k) ) |>
+  ggplot(aes(x = PC1, y = PC2)) +
+  geom_point(aes(fill = k), size = 4, shape = 21, alpha = 0.8) +
+  geom_text(aes(label = rownames(var_pca_fit$x), color = k), vjust = -1.2, size = 2) +
+  theme_minimal() +
+  labs(title = "PCA Plot of Variable Structure",
+       x = paste0("Principal Component 1 ", " (", round(varexp[1]*100,1), "% Variance Explained)"),
+       y = paste0("Principal Component 2 ", " (", round(varexp[2]*100,1), "% Variance Explained)"),
+       fill = "Cluster",
+       subtitle = "   - clusters defined by tree cut above") + 
+  guides(color = "none")
+  
+## save pca plot to file
+f = "../results/figures/variable_correlation_pca_plot.pdf"
+pdf(f, width = 8, height = 6)
+print(pcaplot)
+dev.off()
+```
+
+
+```{r}
+## print to screen
+pcaplot
+```
+
+
+#### PCA biplot  of individual structure
+
+```{r}
+varexp = summary(ind_pca_fit)[[6]][2,]
+
+## 1. Scores (for individuals)
+scores <- ind_pca_fit$x[, 1:2] |>
+  as_tibble(rownames = "Sample") |>
+  select(1:3) 
+
+## k-means on individuals given PC1 and PC2
+ind_k = kmeans( scores[, 2:3], centers = 4)$cluster
+scores <- scores |> mutate( k = as.factor(ind_k) )
+
+## 2. Loadings (variables)
+loadings <- ind_pca_fit$rotation[, 1:2] |>
+  as_tibble(rownames = "Variable")
+
+## 3. Select top 5 contributors for each PC (by absolute loading)
+top_pc1 <- loadings |>
+  arrange(desc(abs(PC1))) |>
+  slice_head(n = 5)
+
+top_pc2 <- loadings |>
+  arrange(desc(abs(PC2))) |>
+  slice_head(n = 5)
+
+# combine, allowing overlap but dropping duplicate rows
+top_loadings <- bind_rows(top_pc1, top_pc2) |>
+  distinct(Variable, .keep_all = TRUE)
+
+## 4. Scale arrows to fit nicely in score space
+arrow_mult <- min(
+  (max(scores$PC1) - min(scores$PC1)) / (max(loadings$PC1) - min(loadings$PC1)),
+  (max(scores$PC2) - min(scores$PC2)) / (max(loadings$PC2) - min(loadings$PC2))
+)
+
+top_loadings_scaled <- top_loadings |>
+  mutate(
+    PC1 = PC1 * arrow_mult * 0.8,
+    PC2 = PC2 * arrow_mult * 0.8
+  )
+
+## 5. Plot: scores + only top loading arrows
+biplot = ggplot() +
+  # points (individuals)
+  geom_point(
+    data = scores,
+    aes(x = PC1, y = PC2, fill = k),
+    size = 4,
+    alpha = 0.8,
+    shape = 21
+  ) +
+  scale_fill_brewer(palette = "Set1") +
+  # loading arrows for top features
+  geom_segment(
+    data = top_loadings_scaled,
+    aes(x = 0, y = 0, xend = PC1, yend = PC2),
+    arrow = arrow(length = unit(0.02, "npc")),
+    color = "dodgerblue"
+  ) +
+  # labels for top features
+  geom_text(
+    data = top_loadings_scaled,
+    aes(x = PC1, y = PC2, label = Variable),
+    hjust = 0.5,
+    vjust = -0.4,
+    size = 2
+  ) +
+  theme_minimal() +
+  labs(
+    title = "PCA Biplot",
+    subtitle = "   - Top contributing variables shown",
+    x = paste0("PC1 (Variance Explained = ", round(varexp[1] * 100, 1), "%)"),
+    y = paste0("PC2 (Variance Explained = ", round(varexp[2] * 100, 1), "%)"),
+    fill = "k-means\nCluster"
+  )
+
+```
+
+
+```{r}
+biplot
+```
+
+## Testing for a condition effect
+
+```{r}
+## Rnank Normal Tranformation function
+rnt <- function(x) {
+  r <- rank(x, na.last = "keep")
+  qnorm( (r - 0.5) / sum(!is.na(x)) )
+}
+
+## testing for condition effects
+cond_effects <- map_dfr(vars_2_test, \(y) {
+  form <- as.formula(paste0("`", y, "` ~ Condition + (1|SubjectID)"))
+  # form <- as.formula(paste0("scale(`", y, "`) ~ Condition + (1|SubjectID)"))
+  # form <- as.formula(paste0("rnt(`", y, "`) ~ Condition + (1|SubjectID)"))
+  fit  <- lmer(form, data = mydata)
+  
+  shap = shapiro.test(residuals(fit))
+  sw_wstat = shap$statistic
+  sw_pvalue = shap$p.value
+  
+  broom.mixed::tidy(fit, effects = "fixed") |>
+    mutate(outcome = y, .before = 1) |>
+    # mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .before = estimate)
+    mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .after = p.value)
+})
+
+## SCALED Data analysis
+scaled_cond_effects <- map_dfr(vars_2_test, \(y) {
+  # form <- as.formula(paste0("`", y, "` ~ Condition + (1|SubjectID)"))
+  form <- as.formula(paste0("scale(`", y, "`) ~ Condition + (1|SubjectID)"))
+  # form <- as.formula(paste0("rnt(`", y, "`) ~ Condition + (1|SubjectID)"))
+  fit  <- lmer(form, data = mydata)
+  
+  shap = shapiro.test(residuals(fit))
+  sw_wstat = shap$statistic
+  sw_pvalue = shap$p.value
+  
+  broom.mixed::tidy(fit, effects = "fixed") |>
+    mutate(outcome = y, .before = 1) |>
+    # mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .before = estimate)
+    mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .after = p.value)
+})
+## edit names
+colnames(scaled_cond_effects)[-c(1:3)] = paste0("scaled_", colnames(scaled_cond_effects)[-c(1:3)])
+
+## Rank Normal Transformed Analysis
+rnt_cond_effects <- map_dfr(vars_2_test, \(y) {
+  # form <- as.formula(paste0("`", y, "` ~ Condition + (1|SubjectID)"))
+  # form <- as.formula(paste0("scale(`", y, "`) ~ Condition + (1|SubjectID)"))
+  form <- as.formula(paste0("rnt(`", y, "`) ~ Condition + (1|SubjectID)"))
+  fit  <- lmer(form, data = mydata)
+  
+  shap = shapiro.test(residuals(fit))
+  sw_wstat = shap$statistic
+  sw_pvalue = shap$p.value
+  
+  broom.mixed::tidy(fit, effects = "fixed") |>
+    mutate(outcome = y, .before = 1) |>
+    # mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .before = estimate)
+    mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .after = p.value)
+})
+## edit names
+colnames(rnt_cond_effects)[-c(1:3)] = paste0("rnt_", colnames(rnt_cond_effects)[-c(1:3)])
+
+
+## merge all sum stats together
+cond_effects = left_join(cond_effects, scaled_cond_effects, by = c("outcome","effect", "term") )
+cond_effects = left_join(cond_effects, rnt_cond_effects, by = c("outcome","effect", "term") )
+
+## print table to screen
+cond_effects = cond_effects |> 
+  filter(term == "ConditionEX") |>
+  mutate( bh_padj = p.adjust(p.value, method = "BH"), .before = shapiro_w ) |>
+  mutate( meets_study_alpha = ifelse(p.value < 0.05/10, "yes", "no"), .before = shapiro_w ) |>
+  arrange(bh_padj) 
+
+## Write sum stats to file
+f = "../results/tables/condition_effects_summary_statistics_March_18_2026.csv"
+write.csv(cond_effects, f, row.names = FALSE)
+
+## print to screen
+cond_effects |> knitr::kable() |> kableExtra::kable_classic(full_width = FALSE)
+
+```
+
+
+#### Forest plot of scaled condition effects
+
+```{r, fig.height=8, fig.width=6}
+fplot = cond_effects |> 
+  filter(term == "ConditionEX") |>
+  ggplot( aes(x = reorder(outcome, scaled_estimate), y = scaled_estimate) ) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", size = 0.75) +
+  geom_errorbar( aes(ymin = scaled_estimate - 1.96*scaled_std.error, 
+                     ymax = scaled_estimate + 1.96*scaled_std.error,
+                     color = as.factor(meets_study_alpha)),
+                 width = 0.2 , size = 0.5) +
+  geom_point( aes(fill = as.factor(meets_study_alpha)), size = 2.5 , shape = 21) +
+  scale_fill_brewer(palette = "Set1", name = "meets\nstudy\nalpha") +
+  scale_color_brewer(palette = "Set1", name = "meets\nstudy\nalpha") +
+  coord_flip() +
+  labs(
+    x = "Outcome",
+    y = "scaled beta: SD units of change under exercise vs rest"
+  ) +
+  theme_minimal()
+fplot
+```
+
+```{r}
+## save forest plot to file
+f = "../results/figures/condition_effects_forest_plot.pdf"
+pdf(f, width = 6, height = 8)
+print(fplot)
+dev.off()
+```
+
+
+## Modeling Energy Intake across meals
+
+### extract meal data 
+
+```{r}
+meal_data = mydata |>
+  select(SubjectID, Condition, contains( c("Breakfast", "Lunch","Snack", "Diner") )) 
+```
+
+### pivot meal data long
+
+```{r}
+meal_data <- meal_data |>
+  pivot_longer(
+    cols = -c(SubjectID, Condition),
+    names_to = c("Meal", "Nutrient"),
+    values_to = "EI",
+    names_pattern = "^(.*)_(.*)_\\(kcal\\)$"
+  ) |>
+  mutate(
+    Meal = case_when(
+      Meal == "Diner" ~ "Dinner",   # fix typo if you want
+      TRUE ~ Meal
+    ),
+    Meal = tolower(Meal),
+    Nutrient = tolower(Nutrient)
+  ) |>
+  pivot_wider(
+    names_from = Nutrient,
+    values_from = EI
+  )
+
+```
+
+### edit meal data nomenclature
+
+```{r}
+## redfine condition
+meal_data <- meal_data |>
+  mutate(
+    Condition = case_when(
+      Condition == "CON"     ~ "rest",
+      Condition == "EX" ~ "exercise",
+      TRUE ~ Condition
+    )
+  )
+
+```
+
+
+### descriptive summary statistics
+
+```{r, message=FALSE, warning=FALSE}
+## quantile functions
+Q2.5  <- \(x) quantile(x, probs = 0.025, type = 7)
+Q97.5 <- \(x) quantile(x, probs = 0.975, type = 7)
+
+tbl_all <- meal_data |>
+  select(-SubjectID) |>
+  # keep `meal` and `condition` separate
+  tbl_strata(
+    strata = Meal,
+    ~ .x |>
+      tbl_summary(
+        by = Condition,
+        statistic = all_continuous() ~ "{median} ({Q2.5}, {Q97.5})"
+      ) |>
+      add_p() |>
+      bold_labels()
+  )
+
+## save tbl_all to file
+merged_tbl <- tbl_all |> as_gt()
+gtsave(merged_tbl, filename = "../results/tables/meal_summary_statistics.html")
+gtsave(merged_tbl, filename = "../results/tables/meal_summary_statistics.png")
+
+```
+
+```{r}
+merged_tbl  |>
+  tab_options(
+    table.width = pct(100),
+    table.font.size = 10,
+    data_row.padding = px(2)
+  )
+```
+
+
+#### Save as a csv file
+
+```{r}
+df_export <- tbl_all |> as_tibble()
+colnames(df_export) = gsub("\\*", "", colnames(df_export) )
+colnames(df_export) = gsub("  \nN = 12", "", colnames(df_export) )
+
+df_export$Characteristic = gsub("__", "", df_export$Characteristic)
+
+colnames(df_export) = paste0( c("", rep("breakfast_",3)  , rep("lunch_",3) , rep("snack_",3) , rep("dinner_",3) ),
+                              colnames(df_export))
+
+write.csv(df_export, "../results/tables/meal_summary_statistics.csv", row.names = FALSE)
+
+```
+
+
+### Testing for a meal condition interaction
+
+```{r}
+## define the outcome to run
+outcomes = colnames(meal_data)[-c(1:3)]
+
+## run the tests
+meal_test_results = lapply(outcomes, function(y) {
+  test_meal_condition_interaction(meal_data, outcome = y)
+})
+
+## set names
+names(meal_test_results) = outcomes
+
+```
+
+### Is there evidence of an interaction effect?
+
+```{r}
+## extract interaction p-values
+lapply(meal_test_results, function(x) x$interaction_pvalue) |> unlist()
+```
+
+
+### meal specific effects
+
+```{r}
+## extract meal specific effects and rbind
+meal_effects = lapply(meal_test_results, function(x) x$emm_out) |> 
+  bind_rows() |> 
+  mutate( bh_padj = p.adjust(p.value, method = "BH") )
+
+## write summary stats to file
+f = "../results/tables/meal_specific_Estimate_Marginal_Mean_effect_summary_statistics.csv"
+write.csv(meal_effects, f, row.names = FALSE)
+
+
+meal_effects |> 
+  select(Meal, outcome, emmean_exercise, emmean_rest, estimate, SE, df, t.ratio, p.value, bh_padj ) |> 
+  arrange(p.value) |>
+  knitr::kable() |> kableExtra::kable_classic(full_width = FALSE)
+```
+
+
+
+## Plot meal specific effects
+
+```{r}
+meal_effects |> 
+  mutate(Meal = factor(Meal, levels = c("breakfast","lunch","snack","dinner"))) |>
+  ggplot( aes(x = Meal, y = estimate, color = outcome) ) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", size = 0.75) +
+  geom_point( position = position_dodge(width = 0.5), size = 3.5 ) +
+  geom_errorbar( aes(ymin = estimate - 1.96*SE, ymax = estimate + 1.96*SE),
+                 position = position_dodge(width = 0.5), width = 0.2 , size = 1) +
+  labs(
+    x = "Meal",
+    y = "Estimated Difference in Energy Intake (kcal)",
+    color = "Outcome"
+  ) +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1")
+```
+
+
+## Contrasting choice of LMM frameworks to identify an effect of condition on Dinner Fat
+
+### Fit a LMM for Dinner Fat ~ Condition + (1|SubjectID)
+
+```{r}
+fit  <- lmer( `Diner_Fat_(kcal)` ~ Condition + (1|SubjectID), data = mydata)
+
+cli::cli_alert_info( "Summary of LMM fit for Dinner Fat ~ Condition + (1|SubjectID)" )
+summary(fit)$coef
+
+cat(paste0("\n\n"))
+
+cli::cli_alert_info( "Estimated Marginal Means and Pairwise Contrasts for Condition Effect on Dinner Fat" )
+emmeans(fit, "Condition", contr = "pairwise")
+
+## is the p-value the same as above?
+# as.data.frame(emmeans(fit, "Condition", contr = "pairwise")$contrast )[,6] ## Yes !!
+```
+
+### Fit a LMM with Meal and Condition interaction for Fat intake
+
+```{r}
+fit1 = lmer( fat ~ Condition * Meal + (1 | SubjectID), data = meal_data)
+summary(fit1)$coef
+```
+
+#### extract emmeans and contrasts for Dinner Fat
+
+```{r}
+## estimate the marginal means and contrasts for Dinner Fat
+emm = emmeans(fit1, ~ Condition | Meal, contr = "pairwise") 
+
+cli::cli_alert_info( "Estimated Marginal Means for Condition Effect on Dinner Fat from Meal LMM" )
+emm$emmeans[3:4]
+  
+cli::cli_alert_info( "Pairwise Contrasts for Condition Effect on Dinner Fat from Meal LMM" )
+emm$contrasts[2]
+
+```
+
+
+
+
+
+
+## Session info
+
+```{r}
+sessionInfo()
+```
+
+
+
