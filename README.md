@@ -1,8 +1,15 @@
 # STRONG: Substrate Oxidation in Girls
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![R ≥ 4.3](https://img.shields.io/badge/R-%E2%89%A5%204.3-276DC3?logo=r&logoColor=white)](https://www.r-project.org/)
+[![Project Status: Active](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
+[![Last commit](https://img.shields.io/github/last-commit/hughesevoanth/strong)](https://github.com/hughesevoanth/strong/commits/main)
+
+---
+
 Analysis code for:
 
-> Adam C Lowe, Heather C. M. Allaway, Peter T. Katzmarzyk, Isabella Reed, Angelique Litsey, David Hughes, Leanne M. Redman, Neil M. Johannsen, Daniel S. Hsia, Eric Ravussin, Nicole Fearnbach
+> Adam C Lowe, Heather C. M. Allaway, Peter T. Katzmarzyk, Isabella Reed, Angelique Litsey, David Hughes, Leanne M. Redman, Neil M. Johannsen, Daniel S. Hsia, Eric Ravussin, Nicole Fearnbach.
 > **Effect of exercise on energy balance and substrate oxidation in adolescent girls with overweight or obesity.** *(in revision)*
 
 ## The study in brief
