@@ -24,12 +24,15 @@ knitr::opts_chunk$set(echo = TRUE)
 
 library(tidyverse)  # install.packages("tidyverse")
 library(lmerTest)
+library(clubSandwich)
 library(readxl)
 library(gtsummary)
 library(gt)
 library(emmeans)
 library(dendextend)
 library(grid)
+library(rmcorr)
+library(patchwork)
 ```
 
 ### source function files
@@ -43,7 +46,7 @@ for(f in files){source(f)}
 ### load data
 
 ```{r}
-f = "../data/STRONG_data spreadsheet.xlsx"
+f = "../../data/STRONG_data spreadsheet.xlsx"
 mydata = read_excel(f)
 
 colnames(mydata) = gsub("\\/", "_", colnames(mydata) ) 
@@ -56,7 +59,7 @@ colnames(mydata) = gsub("\\/", "_", colnames(mydata) )
 colnames(mydata) = gsub(" ", "_", colnames(mydata) )
 ```
 
-## Estiamte the number of effective outcome traits in the data
+## Estimate the number of effective outcome traits in the data
 
 ### Tree Cut
 
@@ -66,7 +69,7 @@ colnames(mydata) = gsub(" ", "_", colnames(mydata) )
 vars_2_test = colnames(mydata)[-c(1:7)]
 # length(vars_2_test) ## 39
 
-Cmat = mydata |> select(vars_2_test) |> cor( use = "pairwise.complete.obs", method = "sp")
+Cmat = mydata |> select(all_of(vars_2_test)) |> cor( use = "pairwise.complete.obs", method = "sp")
 Dmat = as.dist( 1-abs(Cmat) )
 nj = hclust(Dmat, method = "complete")
 
@@ -112,6 +115,7 @@ plot(nj,
 abline(h = 0.5, col = "black", lwd = 2, lty = 2)
 
 ```
+
 #### Correlation Structure Among non-meal variables
 
 ```{r, fig.width = 12, fig.height = 6, warning=FALSE, message=FALSE}
@@ -183,7 +187,7 @@ pcaplot = var_pca_fit$x |> as_tibble() |> mutate(k = as.factor(k) ) |>
   guides(color = "none")
   
 ## save pca plot to file
-f = "../results/figures/variable_correlation_pca_plot.pdf"
+f = "../../results/figures/variable_correlation_pca_plot.pdf"
 pdf(f, width = 8, height = 6)
 print(pcaplot)
 dev.off()
@@ -284,85 +288,178 @@ biplot
 ## Testing for a condition effect
 
 ```{r}
-## Rnank Normal Tranformation function
+# ## Rnank Normal Tranformation function
+# rnt <- function(x) {
+#   r <- rank(x, na.last = "keep")
+#   qnorm( (r - 0.5) / sum(!is.na(x)) )
+# }
+# 
+# ## testing for condition effects
+# cond_effects <- map_dfr(vars_2_test, \(y) {
+#   form <- as.formula(paste0("`", y, "` ~ Condition + (1|SubjectID)"))
+#   # form <- as.formula(paste0("scale(`", y, "`) ~ Condition + (1|SubjectID)"))
+#   # form <- as.formula(paste0("rnt(`", y, "`) ~ Condition + (1|SubjectID)"))
+#   fit  <- lmer(form, data = mydata)
+#   
+#   shap = shapiro.test(residuals(fit))
+#   sw_wstat = shap$statistic
+#   sw_pvalue = shap$p.value
+#   
+#   broom.mixed::tidy(fit, effects = "fixed") |>
+#     mutate(outcome = y, .before = 1) |>
+#     # mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .before = estimate)
+#     mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .after = p.value)
+# })
+# 
+# ## SCALED Data analysis
+# scaled_cond_effects <- map_dfr(vars_2_test, \(y) {
+#   # form <- as.formula(paste0("`", y, "` ~ Condition + (1|SubjectID)"))
+#   form <- as.formula(paste0("scale(`", y, "`) ~ Condition + (1|SubjectID)"))
+#   # form <- as.formula(paste0("rnt(`", y, "`) ~ Condition + (1|SubjectID)"))
+#   fit  <- lmer(form, data = mydata)
+#   
+#   shap = shapiro.test(residuals(fit))
+#   sw_wstat = shap$statistic
+#   sw_pvalue = shap$p.value
+#   
+#   broom.mixed::tidy(fit, effects = "fixed") |>
+#     mutate(outcome = y, .before = 1) |>
+#     # mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .before = estimate)
+#     mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .after = p.value)
+# })
+# ## edit names
+# colnames(scaled_cond_effects)[-c(1:3)] = paste0("scaled_", colnames(scaled_cond_effects)[-c(1:3)])
+# 
+# ## Rank Normal Transformed Analysis
+# rnt_cond_effects <- map_dfr(vars_2_test, \(y) {
+#   # form <- as.formula(paste0("`", y, "` ~ Condition + (1|SubjectID)"))
+#   # form <- as.formula(paste0("scale(`", y, "`) ~ Condition + (1|SubjectID)"))
+#   form <- as.formula(paste0("rnt(`", y, "`) ~ Condition + (1|SubjectID)"))
+#   fit  <- lmer(form, data = mydata)
+#   
+#   shap = shapiro.test(residuals(fit))
+#   sw_wstat = shap$statistic
+#   sw_pvalue = shap$p.value
+#   
+#   broom.mixed::tidy(fit, effects = "fixed") |>
+#     mutate(outcome = y, .before = 1) |>
+#     # mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .before = estimate)
+#     mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .after = p.value)
+# })
+# ## edit names
+# colnames(rnt_cond_effects)[-c(1:3)] = paste0("rnt_", colnames(rnt_cond_effects)[-c(1:3)])
+# 
+# 
+# ## merge all sum stats together
+# cond_effects = left_join(cond_effects, scaled_cond_effects, by = c("outcome","effect", "term") )
+# cond_effects = left_join(cond_effects, rnt_cond_effects, by = c("outcome","effect", "term") )
+# 
+# ## print table to screen
+# cond_effects = cond_effects |> 
+#   filter(term == "ConditionEX") |>
+#   mutate( bh_padj = p.adjust(p.value, method = "BH"), .before = shapiro_w ) |>
+#   mutate( meets_study_alpha = ifelse(p.value < 0.05/10, "yes", "no"), .before = shapiro_w ) |>
+#   arrange(bh_padj) 
+# 
+# ## print to screen
+# cond_effects |> knitr::kable() |> kableExtra::kable_classic(full_width = FALSE)
+
+```
+
+### An extended analysis with sandwich estimators
+
+```{r}
+## Rank normal transformation
 rnt <- function(x) {
   r <- rank(x, na.last = "keep")
-  qnorm( (r - 0.5) / sum(!is.na(x)) )
+  qnorm((r - 0.5) / sum(!is.na(x)))
 }
 
-## testing for condition effects
-cond_effects <- map_dfr(vars_2_test, \(y) {
-  form <- as.formula(paste0("`", y, "` ~ Condition + (1|SubjectID)"))
-  # form <- as.formula(paste0("scale(`", y, "`) ~ Condition + (1|SubjectID)"))
-  # form <- as.formula(paste0("rnt(`", y, "`) ~ Condition + (1|SubjectID)"))
-  fit  <- lmer(form, data = mydata)
-  
-  shap = shapiro.test(residuals(fit))
-  sw_wstat = shap$statistic
-  sw_pvalue = shap$p.value
-  
+## One model per outcome x transform
+fit_condition <- function(y, transform = c("none", "scale", "rnt"), data = mydata) {
+  transform <- match.arg(transform)
+  lhs <- switch(transform,
+    none  = paste0("`", y, "`"),
+    scale = paste0("scale(`", y, "`)"),
+    rnt   = paste0("rnt(`", y, "`)")
+  )
+  fit <- lmer(as.formula(paste(lhs, "~ Condition + (1|SubjectID)")), data = data)
+
+  shap <- shapiro.test(residuals(fit))
+
+  # CR2 sandwich SEs; for lmer fits the cluster defaults to the grouping factor
+  # (SubjectID), so rows dropped for NA stay aligned
+  rob <- as.data.frame(coef_test(fit, vcov = "CR2", test = "Satterthwaite"))
+  rob <- rob[rob$Coef == "ConditionEX", ]
+
   broom.mixed::tidy(fit, effects = "fixed") |>
+    filter(term == "ConditionEX") |>
     mutate(outcome = y, .before = 1) |>
-    # mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .before = estimate)
-    mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .after = p.value)
+    mutate(
+      shapiro_w        = unname(shap$statistic),
+      shapiro_p        = shap$p.value,
+      singular         = isSingular(fit),
+      robust_std.error = rob$SE,
+      robust_statistic = rob$tstat,
+      robust_df        = rob$df_Satt,
+      robust_p.value   = rob$p_Satt,
+      .after = p.value
+    )
+}
+
+## Descriptives by condition (original units)
+cond_desc <- map_dfr(vars_2_test, \(y) {
+  d <- mydata |>
+    select(SubjectID, Condition, val = all_of(y)) |>
+    filter(!is.na(val)) |>
+    mutate(cond = if_else(Condition == "EX", "ex", "rest"))
+
+  d |>
+    group_by(cond) |>
+    summarise(n = n(), mean = mean(val), sd = sd(val), .groups = "drop") |>
+    pivot_wider(
+      names_from  = cond,
+      values_from = c(n, mean, sd),
+      names_glue  = "{.value}_{cond}"
+    ) |>
+    mutate(
+      outcome  = y,
+      n_pairs  = sum(table(d$SubjectID) == 2),
+      sd_ratio = sd_ex / sd_rest,
+      .before = 1
+    ) |>
+    relocate(n_rest, n_ex, mean_rest, sd_rest, mean_ex, sd_ex, sd_ratio, .after = n_pairs)
 })
 
-## SCALED Data analysis
-scaled_cond_effects <- map_dfr(vars_2_test, \(y) {
-  # form <- as.formula(paste0("`", y, "` ~ Condition + (1|SubjectID)"))
-  form <- as.formula(paste0("scale(`", y, "`) ~ Condition + (1|SubjectID)"))
-  # form <- as.formula(paste0("rnt(`", y, "`) ~ Condition + (1|SubjectID)"))
-  fit  <- lmer(form, data = mydata)
-  
-  shap = shapiro.test(residuals(fit))
-  sw_wstat = shap$statistic
-  sw_pvalue = shap$p.value
-  
-  broom.mixed::tidy(fit, effects = "fixed") |>
-    mutate(outcome = y, .before = 1) |>
-    # mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .before = estimate)
-    mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .after = p.value)
-})
-## edit names
-colnames(scaled_cond_effects)[-c(1:3)] = paste0("scaled_", colnames(scaled_cond_effects)[-c(1:3)])
+## Run all three versions
+key <- c("outcome", "effect", "term")
 
-## Rank Normal Transformed Analysis
-rnt_cond_effects <- map_dfr(vars_2_test, \(y) {
-  # form <- as.formula(paste0("`", y, "` ~ Condition + (1|SubjectID)"))
-  # form <- as.formula(paste0("scale(`", y, "`) ~ Condition + (1|SubjectID)"))
-  form <- as.formula(paste0("rnt(`", y, "`) ~ Condition + (1|SubjectID)"))
-  fit  <- lmer(form, data = mydata)
-  
-  shap = shapiro.test(residuals(fit))
-  sw_wstat = shap$statistic
-  sw_pvalue = shap$p.value
-  
-  broom.mixed::tidy(fit, effects = "fixed") |>
-    mutate(outcome = y, .before = 1) |>
-    # mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .before = estimate)
-    mutate(shapiro_w = sw_wstat, shapiro_p = sw_pvalue, .after = p.value)
-})
-## edit names
-colnames(rnt_cond_effects)[-c(1:3)] = paste0("rnt_", colnames(rnt_cond_effects)[-c(1:3)])
+orig_cond_effects <- map_dfr(vars_2_test, fit_condition, transform = "none")
+
+scaled_cond_effects <- map_dfr(vars_2_test, fit_condition, transform = "scale") |>
+  rename_with(\(x) paste0("scaled_", x), -all_of(key))
+
+rnt_cond_effects <- map_dfr(vars_2_test, fit_condition, transform = "rnt") |>
+  rename_with(\(x) paste0("rnt_", x), -all_of(key))
+
+## Merge
+cond_effects <- orig_cond_effects |>
+  left_join(cond_desc, by = "outcome") |>
+  relocate(names(cond_desc)[-1], .after = term) |>
+  left_join(scaled_cond_effects, by = key) |>
+  left_join(rnt_cond_effects, by = key) |>
+  mutate(bh_padj = p.adjust(p.value, method = "BH"), .before = shapiro_w) |>
+  mutate(meets_study_alpha = ifelse(p.value < 0.05 / 10, "yes", "no"), .before = shapiro_w) |>
+  arrange(bh_padj)
+```
 
 
-## merge all sum stats together
-cond_effects = left_join(cond_effects, scaled_cond_effects, by = c("outcome","effect", "term") )
-cond_effects = left_join(cond_effects, rnt_cond_effects, by = c("outcome","effect", "term") )
-
-## print table to screen
-cond_effects = cond_effects |> 
-  filter(term == "ConditionEX") |>
-  mutate( bh_padj = p.adjust(p.value, method = "BH"), .before = shapiro_w ) |>
-  mutate( meets_study_alpha = ifelse(p.value < 0.05/10, "yes", "no"), .before = shapiro_w ) |>
-  arrange(bh_padj) 
+```{r}
 
 ## Write sum stats to file
-f = "../results/tables/condition_effects_summary_statistics_March_18_2026.csv"
+# f = "../results/tables/condition_effects_summary_statistics_March_18_2026.csv"
+f = "../../results/tables/condition_effects_summary_statistics_Nov_11_2026.csv"
 write.csv(cond_effects, f, row.names = FALSE)
-
-## print to screen
-cond_effects |> knitr::kable() |> kableExtra::kable_classic(full_width = FALSE)
 
 ```
 
@@ -392,11 +489,296 @@ fplot
 
 ```{r}
 ## save forest plot to file
-f = "../results/figures/condition_effects_forest_plot.pdf"
+f = "../../results/figures/condition_effects_forest_plot.pdf"
 pdf(f, width = 6, height = 8)
 print(fplot)
 dev.off()
 ```
+
+## Carbohydrate oxidation and EI
+
+### A repeated measure correlation
+
+```{r}
+d <- mydata |>
+  dplyr::select(SubjectID, Condition,
+                cho_ox = `Visit_CarbEE_(kcal)`,
+                ei     = `Visit_Total_EI_(kcal)`) |>
+  dplyr::filter(!is.na(cho_ox), !is.na(ei)) |>
+  dplyr::group_by(SubjectID) |>
+  dplyr::mutate(cho_between = mean(cho_ox),
+                cho_within  = cho_ox - cho_between) |>
+  dplyr::ungroup()
+
+## Repeated-measures correlation: within-person association only
+rmc <- rmcorr(participant = SubjectID, measure1 = cho_ox, measure2 = ei, dataset = d)
+rmc   # r, df, p, 95% CI
+
+```
+
+## A correlation of change
+
+```{r}
+dd <- d |>
+  dplyr::select(SubjectID, Condition, cho_ox, ei) |>
+  tidyr::pivot_wider(names_from = Condition, values_from = c(cho_ox, ei)) |>
+  dplyr::mutate(d_cho = cho_ox_EX - cho_ox_CON, d_ei = ei_EX - ei_CON)
+
+cor.test(dd$d_cho, dd$d_ei)   # association of individual changes, mean shift removed
+```
+
+
+### LMM separating within- and between-person associations
+
+```{r}
+fit <- lmer(ei ~ cho_within + cho_between + Condition + (1 | SubjectID), data = d)
+summary(fit)
+```
+
+
+```{r}
+ox_vars   <- c(cho_ox = "Visit_CarbEE_(kcal)", fat_ox = "Visit_FatEE_(kcal)")
+resp_vars <- c(ei = "Visit_Total_EI_(kcal)",
+               hunger = "Visit_VAS_Hunger_AUC", fullness = "Visit_VAS_Fullness_AUC",
+               desire = "Visit_VAS_Desire_AUC", amount = "Visit_VAS_Amount_AUC",
+               satisfied = "Visit_VAS_Satisfied_AUC")
+
+## 1. Within-between models: oxidation vs EI and appetite
+wb_fit <- function(x, y) {
+  d <- mydata |>
+    select(SubjectID, Condition, x = all_of(x), y = all_of(y)) |>
+    filter(!is.na(x), !is.na(y)) |>
+    group_by(SubjectID) |>
+    mutate(x_between = mean(x), x_within = x - x_between) |>
+    ungroup()
+  fit <- lmer(y ~ x_within + x_between + Condition + (1 | SubjectID), data = d)
+  broom.mixed::tidy(fit, effects = "fixed", conf.int = TRUE) |>
+    filter(term %in% c("x_within", "x_between")) |>
+    mutate(predictor = x, outcome = y, n_obs = nrow(d), .before = 1)
+}
+
+assoc_wb <- tidyr::expand_grid(x = ox_vars, y = resp_vars) |>
+  pmap_dfr(\(x, y) wb_fit(x, y))
+
+## 2. Exercise RER (EX visit only, one value per girl) vs EI and appetite
+ex <- mydata |> filter(Condition == "EX")
+assoc_rer <- map_dfr(resp_vars, \(y) {
+  ct <- cor.test(ex$EX_REST_RQ, ex[[y]])
+  tibble(predictor = "EX_REST_RQ", outcome = y, n = sum(complete.cases(ex$EX_REST_RQ, ex[[y]])),
+         r = unname(ct$estimate), conf.low = ct$conf.int[1], conf.high = ct$conf.int[2],
+         p.value = ct$p.value)
+})
+
+assoc_rer |> knitr::kable() |> kableExtra::kable_classic()
+```
+
+
+## Table 2 
+
+```{r}
+table2_vars <- c("Visit_Total_EI_(kcal)", "Visit_FAT_Intake_(kcal)", "Visit_CHO_Intake_(kcal)",
+                 "Visit_Protien_Intake_(kcal)", "Visit_24HourEE_(kcal)", "Activity_EE",
+                 "Visit_nonActivity24HourEE_(kcal)", "Visit_Total_EB_(kcal)", "Visit_Fat_EB_(kcal)",
+                 "Visit_CHO_EB_(kcal)", "Visit_Protien_EB_(kcal)", "Visit_24HourRQ", "EX_REST_RQ",
+                 "Visit_FatEE_(kcal)", "Visit_CarbEE_(kcal)", "Visit_ProtienEE_(kcal)")
+
+table2 <- map_dfr(table2_vars, \(y) {
+  fit <- lmer(as.formula(paste0("`", y, "` ~ Condition + (1|SubjectID)")), data = mydata)
+  # em  <- summary(emmeans(fit, ~ Condition))
+  # ct  <- summary(contrast(emmeans(fit, ~ Condition), "revpairwise"))
+  em_obj <- emmeans(fit, ~ Condition, lmer.df = "satterthwaite")
+  em  <- summary(em_obj)
+  ct  <- summary(contrast(em_obj, "revpairwise"))
+  tibble(outcome  = y,
+         ex_mean  = em$emmean[em$Condition == "EX"],  ex_se  = em$SE[em$Condition == "EX"],
+         rest_mean = em$emmean[em$Condition == "CON"], rest_se = em$SE[em$Condition == "CON"],
+         diff = ct$estimate, p.value = ct$p.value)
+})
+```
+
+
+```{r}
+## Row layout: group, label, decimals
+lab <- tribble(
+  ~outcome,                           ~group,                                  ~label,            ~digits,
+  "Visit_Total_EI_(kcal)",            "Daily EI (kcal)",                       "Total",           0,
+  "Visit_FAT_Intake_(kcal)",          "Daily EI (kcal)",                       "Fat",             0,
+  "Visit_CHO_Intake_(kcal)",          "Daily EI (kcal)",                       "Carbohydrate",    0,
+  "Visit_Protien_Intake_(kcal)",      "Daily EI (kcal)",                       "Protein",         0,
+  "Visit_24HourEE_(kcal)",            "Daily EE (kcal)",                       "Total",           0,
+  "Activity_EE",                      "Daily EE (kcal)",                       "Activity",        0,
+  "Visit_nonActivity24HourEE_(kcal)", "Daily EE (kcal)",                       "Non-activity",    0,
+  "Visit_Total_EB_(kcal)",            "Daily EB (kcal)",                       "Total",           0,
+  "Visit_Fat_EB_(kcal)",              "Daily EB (kcal)",                       "Fat",             0,
+  "Visit_CHO_EB_(kcal)",              "Daily EB (kcal)",                       "Carbohydrate",    0,
+  "Visit_Protien_EB_(kcal)",          "Daily EB (kcal)",                       "Protein",         0,
+  "Visit_24HourRQ",                   "RER",                                   "Average daily",   3,
+  "EX_REST_RQ",                       "RER",                                   "Exercise period", 3,
+  "Visit_FatEE_(kcal)",               "Total daily substrate oxidation (kcal)", "Fat",            0,
+  "Visit_CarbEE_(kcal)",              "Total daily substrate oxidation (kcal)", "Carbohydrate",   0,
+  "Visit_ProtienEE_(kcal)",           "Total daily substrate oxidation (kcal)", "Protein",        0
+)
+
+## Formatting helpers
+fmt_num <- function(x, d) formatC(round(x, d), format = "f", digits = d, big.mark = " ")
+
+sup <- function(s) chartr("-0123456789", "\u207b\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079", s)
+
+fmt_p <- function(p) {
+  out <- formatC(p, format = "fg", digits = 2, flag = "#")
+  small <- p < 0.001
+  e <- floor(log10(p[small]))
+  m <- round(p[small] / 10^e, 1)
+  e[m == 10] <- e[m == 10] + 1
+  m[m == 10] <- 1
+  out[small] <- paste0(formatC(m, format = "f", digits = 1), " \u00d7 10", sup(e))
+  out
+}
+
+## Build display table
+t2_df <- lab |>
+  left_join(table2, by = "outcome") |>
+  rowwise() |>
+  mutate(
+    ex   = paste0(fmt_num(ex_mean, digits),   " \u00b1 ", fmt_num(ex_se, digits)),
+    rest = paste0(fmt_num(rest_mean, digits), " \u00b1 ", fmt_num(rest_se, digits)),
+    dif  = fmt_num(diff, digits),
+    p    = fmt_p(p.value)
+  ) |>
+  ungroup() |>
+  select(group, label, ex, rest, dif, p)
+
+t2 <- gt(t2_df, groupname_col = "group", rowname_col = "label") |>
+  # tab_header(title = md("**Table 2:** Energy balance and substrate utilization between conditions")) |>
+  tab_spanner(label = "EX",                     columns = ex) |>
+  tab_spanner(label = "REST",                   columns = rest) |>
+  tab_spanner(label = "Difference (EX \u2212 REST)", columns = dif) |>
+  cols_label(ex = "Mean \u00b1 SE", rest = "Mean \u00b1 SE", dif = "Mean", p = md("*p* value")) |>
+  cols_align("center", columns = c(ex, rest, dif, p)) |>
+  tab_stub_indent(rows = everything(), indent = 3) |>
+  tab_source_note(paste(
+    "Values are model-estimated means \u00b1 SE from linear mixed models with condition as a fixed effect",
+    "and a random intercept for participant; differences are model-estimated EX \u2212 REST.",
+    "p values are from t tests with Satterthwaite degrees of freedom. All available observations were",
+    "included; one participant was missing REST data for chamber-derived outcomes.",
+    "Abbreviations: EX, exercise condition; REST, rest condition; EI, energy intake;",
+    "EE, energy expenditure; EB, energy balance; RER, respiratory exchange ratio."
+  )) |>
+  tab_options(
+    table.font.names         = "Times New Roman",
+    heading.align            = "left",
+    row_group.font.weight    = "bold",
+    column_labels.font.weight = "normal",
+    table.border.top.color   = "black",
+    table_body.hlines.color  = "white",
+    data_row.padding         = px(2)
+  )
+
+
+t2
+```
+
+## Save Table 2
+
+```{r}
+gtsave(t2, filename = "../../results/tables/Table2.pdf")
+```
+
+
+## Figure 2
+
+```{r, fig.width = 9, fig.height = 8}
+##  Inputs
+paired <- FALSE   # TRUE draws a light line joining each girl's REST and EX values
+alpha  <- 0.005
+
+meal_vars <- expand_grid(meal = c("Breakfast", "Lunch", "Snack", "Diner"),
+                         nutr = c("total", "PRO", "Fat", "CHO")) |>
+  mutate(var = paste0(meal, "_", nutr, "_(kcal)"))
+
+### Long data with manual dodge + jitter 
+set.seed(2026)
+plot_df <- mydata |>
+  select(SubjectID, Condition, all_of(meal_vars$var)) |>
+  pivot_longer(-c(SubjectID, Condition), names_to = "var", values_to = "kcal") |>
+  filter(!is.na(kcal)) |>
+  left_join(meal_vars, by = "var") |>
+  mutate(
+    meal      = factor(if_else(meal == "Diner", "Dinner", meal),
+                       levels = c("Breakfast", "Lunch", "Snack", "Dinner")),
+    Condition = factor(if_else(Condition == "EX", "EX", "REST"), levels = c("REST", "EX")),
+    x         = as.numeric(meal) + if_else(Condition == "EX", 0.18, -0.18),
+    x_j       = x + runif(n(), -0.07, 0.07)
+  )
+
+means_df <- plot_df |>
+  group_by(nutr, meal, Condition, x) |>
+  summarise(mean = mean(kcal), .groups = "drop")
+
+### p value labels (plotmath, exact values)
+p_lab <- function(p) {
+  if (p >= 0.001) return(sprintf('italic(p) == "%s"', formatC(p, format = "fg", digits = 2, flag = "#")))
+  e <- floor(log10(p)); m <- round(p / 10^e, 1)
+  if (m == 10) { m <- 1; e <- e + 1 }
+  sprintf('italic(p) == "%s" %%*%% 10^%d', formatC(m, format = "f", digits = 1), e)
+}
+
+panel_max <- plot_df |> group_by(nutr) |> summarise(pmax = max(kcal))
+meal_max  <- plot_df |> group_by(nutr, meal) |> summarise(top = max(kcal), .groups = "drop")
+
+## narrower jitter, slightly wider separation between conditions
+plot_df <- plot_df |>
+  mutate(x   = as.numeric(meal) + if_else(Condition == "EX", 0.2, -0.2),
+         x_j = x + runif(n(), -0.05, 0.05))
+means_df <- plot_df |>
+  group_by(nutr, meal, Condition, x) |>
+  summarise(mean = mean(kcal), .groups = "drop")
+
+plot_nutr <- function(n, title) {
+  d  <- filter(plot_df,  nutr == n)
+  m  <- filter(means_df, nutr == n)
+  pa <- filter(p_df,     nutr == n)
+
+  ggplot() +
+    (if (paired) geom_line(data = d, aes(x_j, kcal, group = interaction(SubjectID, meal)),
+                           colour = "grey85", linewidth = 0.3)) +
+    geom_point(data = d, aes(x_j, kcal, shape = Condition, fill = Condition),
+               size = 2.6, stroke = 0.5, colour = "grey25", alpha = 0.7) +
+    geom_segment(data = m, aes(x = x - 0.16, xend = x + 0.16, y = mean, yend = mean),
+                 linewidth = 1.4, lineend = "butt") +
+    geom_segment(data = pa, aes(x = xc - 0.2, xend = xc + 0.2, y = yb, yend = yb)) +
+    geom_segment(data = pa, aes(x = xc - 0.2, xend = xc - 0.2, y = yb, yend = yb - tick)) +
+    geom_segment(data = pa, aes(x = xc + 0.2, xend = xc + 0.2, y = yb, yend = yb - tick)) +
+    geom_text(data = pa, aes(x = xc, y = yb + tick, label = label),
+              parse = TRUE, vjust = 0, size = 3.3) +
+    scale_shape_manual(values = c(REST = 21, EX = 24), name = NULL) +
+    scale_fill_manual(values  = c(REST = "grey45", EX = "grey90"), name = NULL) +
+    scale_x_continuous(breaks = 1:4, labels = levels(plot_df$meal),
+                       expand = expansion(add = 0.5)) +
+    scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.15))) +
+    labs(title = title, x = NULL, y = "Intake (kcal)") +
+    theme_classic(base_size = 12) +
+    theme(plot.title  = element_text(face = "bold", hjust = 0.5),
+          axis.text   = element_text(colour = "black"))
+}
+
+###  Patchwork 
+fig2 <- (plot_nutr("total", "Total energy") + plot_nutr("PRO", "Protein")) /
+        (plot_nutr("Fat",   "Fat")          + plot_nutr("CHO", "Carbohydrate")) +
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A") &
+  theme(legend.position = "bottom",
+        plot.tag = element_text(face = "bold", size = 16))
+
+fig2
+```
+
+### Save Figure 2
+
+```{r}
+ggsave("../../results/figures/Figure2.pdf", fig2, width = 9, height = 8)   # vector PDF
+```
+
 
 
 ## Modeling Energy Intake across meals
@@ -472,8 +854,8 @@ tbl_all <- meal_data |>
 
 ## save tbl_all to file
 merged_tbl <- tbl_all |> as_gt()
-gtsave(merged_tbl, filename = "../results/tables/meal_summary_statistics.html")
-gtsave(merged_tbl, filename = "../results/tables/meal_summary_statistics.png")
+gtsave(merged_tbl, filename = "../../results/tables/meal_summary_statistics.html")
+gtsave(merged_tbl, filename = "../../results/tables/meal_summary_statistics.png")
 
 ```
 
@@ -537,7 +919,7 @@ meal_effects = lapply(meal_test_results, function(x) x$emm_out) |>
   mutate( bh_padj = p.adjust(p.value, method = "BH") )
 
 ## write summary stats to file
-f = "../results/tables/meal_specific_Estimate_Marginal_Mean_effect_summary_statistics.csv"
+f = "../../results/tables/meal_specific_Estimate_Marginal_Mean_effect_summary_statistics.csv"
 write.csv(meal_effects, f, row.names = FALSE)
 
 
