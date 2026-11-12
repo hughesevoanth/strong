@@ -2,7 +2,7 @@
 
 Analysis code for:
 
-> Lowe AC, Fearnbach N, Allaway HCM, Katzmarzyk PT, Reed I, Litsey A, Hughes DA, Redman LM, Johannsen NM, Hsia DS, Ravussin E.
+> Adam C Lowe, Heather C. M. Allaway, Peter T. Katzmarzyk, Isabella Reed, Angelique Litsey, David Hughes, Leanne M. Redman, Neil M. Johannsen, Daniel S. Hsia, Eric Ravussin, Nicole Fearnbach
 > **Effect of exercise on energy balance and substrate oxidation in adolescent girls with overweight or obesity.** *(in revision)*
 
 ## The study in brief
